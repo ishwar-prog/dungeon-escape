@@ -40,8 +40,31 @@ export default function App() {
   const [confettiFire, setConfettiFire] = useState(false);
   const [lastXpEarned, setLastXpEarned] = useState(0);
 
+  // New Gamey RPG states
+  const [health, setHealth] = useState(5);
+  const [timeLeft, setTimeLeft] = useState(25 * 60); // 25:00 in seconds
+  const [gameState, setGameState] = useState("playing"); // playing | gameover
+
   const progress = language ? progressByLang[language] : null;
   const level = LEVELS[currentLevelIdx];
+
+  // Timer Tick logic
+  useEffect(() => {
+    let timerId;
+    if (screen === "level" && gameState === "playing") {
+      timerId = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerId);
+            setGameState("gameover");
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timerId);
+  }, [screen, gameState]);
 
   useEffect(() => {
     if (level && language) {
@@ -54,11 +77,14 @@ export default function App() {
     setLanguage(lang);
     const prog = progressByLang[lang];
     const nextLevelId =
-      prog.completedLevels.length >= 20 ? 1 : prog.completedLevels.length + 1;
+      prog.completedLevels.length >= LEVELS.length ? 1 : prog.completedLevels.length + 1;
     const idx = LEVELS.findIndex((l) => l.id === nextLevelId);
     setCurrentLevelIdx(idx === -1 ? 0 : idx);
     setFeedback(null);
     setHintIndex(0);
+    setHealth(5);
+    setTimeLeft(25 * 60);
+    setGameState("playing");
     setScreen("level");
   };
 
@@ -70,6 +96,8 @@ export default function App() {
   };
 
   const handleSubmit = () => {
+    if (gameState === "gameover") return;
+
     const result = heuristicCheck(code, level);
     const alreadyAttemptedThisLevel = progress.currentAttemptedThisLevel;
 
@@ -93,20 +121,41 @@ export default function App() {
           currentAttemptedThisLevel: false,
         };
       });
-      setFeedback({ type: "success", message: "Solved! The chamber door creaks open..." });
+      setFeedback({ type: "success", message: "Solved! The dungeon gate unlocks..." });
       setConfettiFire(true);
       setTimeout(() => setConfettiFire(false), 2500);
       setShowComplete(true);
     } else {
+      const isWeak = result.reason === "weak";
+
+      if (isWeak) {
+        // Deduct health on actual incorrect attempts
+        setHealth((prev) => {
+          const nextHealth = Math.max(0, prev - 1);
+          if (nextHealth === 0) {
+            setGameState("gameover");
+            setFeedback({
+              type: "error",
+              message: "You ran out of health! The dungeon collapsed.",
+            });
+          }
+          return nextHealth;
+        });
+      }
+
       const messages = {
-        unchanged: "Looks like you haven't started yet — give it a try! Stuck? Grab a hint.",
-        tooshort: "You're just getting started. Flesh out your logic a bit more — you're close!",
-        weak: "Good attempt, but something's off. Re-read the problem, or peek at a hint for a nudge.",
+        unchanged: "Starter code is untouched! Write your solution before submitting.",
+        tooshort: "Your code is too short! Flesh out the logic a bit more.",
+        weak: "Oops! Incorrect logic. You lost 1 Health heart!",
       };
-      setFeedback({
-        type: "encourage",
-        message: messages[result.reason] || "Not quite there yet — keep going, you've got this!",
-      });
+      
+      if (!isWeak || health > 1) {
+        setFeedback({
+          type: "encourage",
+          message: messages[result.reason] || "Oops! Incorrect logic. Give it another try!",
+        });
+      }
+
       updateProgress((p) => ({
         ...p,
         attempts: p.attempts + 1,
@@ -148,7 +197,18 @@ export default function App() {
     updateProgress(() => emptyProgress());
     setCurrentLevelIdx(0);
     setFeedback(null);
+    setHealth(5);
+    setTimeLeft(25 * 60);
+    setGameState("playing");
     setScreen("level");
+  };
+
+  const handleTryAgain = () => {
+    // Reset timer and health, keep progress, retry current level
+    setHealth(5);
+    setTimeLeft(25 * 60);
+    setGameState("playing");
+    setFeedback(null);
   };
 
   const handleChangeLanguage = () => {
@@ -157,7 +217,7 @@ export default function App() {
   };
 
   return (
-    <div className="dungeon-root">
+    <div className="dungeon-root min-h-screen bg-[#2B1B3D]">
       <Confetti fire={confettiFire} />
 
       {screen === "lang" && (
@@ -179,6 +239,12 @@ export default function App() {
             feedback={feedback}
             xp={progress.totalXP}
             streak={progress.streak}
+            health={health}
+            timeLeft={timeLeft}
+            gameState={gameState}
+            onTryAgain={handleTryAgain}
+            onChangeLanguage={handleChangeLanguage}
+            completedLevels={progress.completedLevels}
           />
           {showHint && (
             <HintPanel
